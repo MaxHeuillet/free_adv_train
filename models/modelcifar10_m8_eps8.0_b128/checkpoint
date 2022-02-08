@@ -1,0 +1,2 @@
+model_checkpoint_path: "checkpoint-79999"
+all_model_checkpoint_paths: "checkpoint-79999"
