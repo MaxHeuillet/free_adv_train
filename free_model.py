@@ -6,7 +6,9 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import json
+import keras
 
+tf.compat.v1.disable_eager_execution()
 
 class Model(object):
     """ResNet model."""
@@ -35,16 +37,16 @@ class Model(object):
     def _build_model(self):
         assert self.mode == 'train' or self.mode == 'eval'
         """Build the core model within the graph."""
-        with tf.variable_scope('input'):
+        with tf.compat.v1.variable_scope('input'):
 
-            self.x_input = tf.placeholder(
+            self.x_input = tf.compat.v1.placeholder(
                 tf.float32,
                 shape=[None, 32, 32, 3])
 
-            self.y_input = tf.placeholder(tf.int64, shape=None)
+            self.y_input = tf.compat.v1.placeholder(tf.int64, shape=None)
 
             if self.pert:
-                self.pert = tf.get_variable(name='instance_perturbation', initializer=tf.zeros_initializer,
+                self.pert = tf.compat.v1.get_variable(name='instance_perturbation', initializer=tf.zeros_initializer,
                                             shape=[self.train_batch_size, 32, 32, 3], dtype=tf.float32,
                                             trainable=True)
                 self.final_input = self.x_input + self.pert
@@ -63,38 +65,38 @@ class Model(object):
         # It is more memory efficient than very deep residual network and has
         # comparably good performance.
         # https://arxiv.org/pdf/1605.07146v1.pdf
-        filters = [16, 160, 320, 640]
+        filters = [16, 32, 64, 120]
 
         # Update hps.num_residual_units to 9
 
-        with tf.variable_scope('unit_1_0'):
+        with tf.compat.v1.variable_scope('unit_1_0'):
             x = res_func(x, filters[0], filters[1], self._stride_arr(strides[0]),
                          activate_before_residual[0])
         for i in range(1, 5):
-            with tf.variable_scope('unit_1_%d' % i):
+            with tf.compat.v1.variable_scope('unit_1_%d' % i):
                 x = res_func(x, filters[1], filters[1], self._stride_arr(1), False)
 
-        with tf.variable_scope('unit_2_0'):
+        with tf.compat.v1.variable_scope('unit_2_0'):
             x = res_func(x, filters[1], filters[2], self._stride_arr(strides[1]),
                          activate_before_residual[1])
         for i in range(1, 5):
-            with tf.variable_scope('unit_2_%d' % i):
+            with tf.compat.v1.variable_scope('unit_2_%d' % i):
                 x = res_func(x, filters[2], filters[2], self._stride_arr(1), False)
 
-        with tf.variable_scope('unit_3_0'):
+        with tf.compat.v1.variable_scope('unit_3_0'):
             x = res_func(x, filters[2], filters[3], self._stride_arr(strides[2]),
                          activate_before_residual[2])
         for i in range(1, 5):
-            with tf.variable_scope('unit_3_%d' % i):
+            with tf.compat.v1.variable_scope('unit_3_%d' % i):
                 x = res_func(x, filters[3], filters[3], self._stride_arr(1), False)
 
-        with tf.variable_scope('unit_last'):
+        with tf.compat.v1.variable_scope('unit_last'):
             x = self._batch_norm('final_bn', x)
             x = self._relu(x, 0.1)
             x = self._global_avg_pool(x)
             self.neck = x
 
-        with tf.variable_scope('logit'):
+        with tf.compat.v1.variable_scope('logit'):
             self.pre_softmax = self._fully_connected(x, self.num_classes)
 
         self.predictions = tf.argmax(self.pre_softmax, 1)
@@ -103,7 +105,7 @@ class Model(object):
         self.num_correct = tf.reduce_sum(tf.cast(self.correct_prediction, tf.int64))
         self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
 
-        with tf.variable_scope('costs'):
+        with tf.compat.v1.variable_scope('costs'):
             self.y_xent = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=self.pre_softmax, labels=self.y_input)
             self.xent = tf.reduce_sum(self.y_xent, name='y_xent')
@@ -112,32 +114,31 @@ class Model(object):
 
     def _batch_norm(self, name, x):
         """Batch normalization."""
-        with tf.name_scope(name):
-            return tf.contrib.layers.batch_norm(inputs=x, decay=.9, center=True, scale=True, activation_fn=None,
-                                                updates_collections=None, is_training=(self.mode == 'train'))
+        with tf.compat.v1.name_scope(name):
+            return keras.layers.BatchNormalization(scale=True, center=True, trainable=True)(x)
 
     def _residual(self, x, in_filter, out_filter, stride, activate_before_residual=False):
         """Residual unit with 2 sub layers."""
         if activate_before_residual:
-            with tf.variable_scope('shared_activation'):
+            with tf.compat.v1.variable_scope('shared_activation'):
                 x = self._batch_norm('init_bn', x)
                 x = self._relu(x, 0.1)
                 orig_x = x
         else:
-            with tf.variable_scope('residual_only_activation'):
+            with tf.compat.v1.variable_scope('residual_only_activation'):
                 orig_x = x
                 x = self._batch_norm('init_bn', x)
                 x = self._relu(x, 0.1)
 
-        with tf.variable_scope('sub1'):
+        with tf.compat.v1.variable_scope('sub1'):
             x = self._conv('conv1', x, 3, in_filter, out_filter, stride)
 
-        with tf.variable_scope('sub2'):
+        with tf.compat.v1.variable_scope('sub2'):
             x = self._batch_norm('bn2', x)
             x = self._relu(x, 0.1)
             x = self._conv('conv2', x, 3, out_filter, out_filter, [1, 1, 1, 1])
 
-        with tf.variable_scope('sub_add'):
+        with tf.compat.v1.variable_scope('sub_add'):
             if in_filter != out_filter:
                 orig_x = tf.nn.avg_pool(orig_x, stride, stride, 'VALID')
                 orig_x = tf.pad(
@@ -145,30 +146,30 @@ class Model(object):
                              [(out_filter - in_filter) // 2, (out_filter - in_filter) // 2]])
             x += orig_x
 
-        tf.logging.debug('image after unit %s', x.get_shape())
+        tf.compat.v1.logging.debug('image after unit %s', x.get_shape())
         return x
 
     def _decay(self):
         """L2 weight decay loss."""
         costs = []
-        for var in tf.trainable_variables():
+        for var in tf.compat.v1.trainable_variables():
             if var.op.name.find('DW') > 0:
                 costs.append(tf.nn.l2_loss(var))
-        return tf.add_n(costs)
+        return tf.compat.v1.add_n(costs)
 
     def _conv(self, name, x, filter_size, in_filters, out_filters, strides):
         """Convolution."""
-        with tf.variable_scope(name):
+        with tf.compat.v1.variable_scope(name):
             n = filter_size * filter_size * out_filters
-            kernel = tf.get_variable(
+            kernel = tf.compat.v1.get_variable(
                 'DW', [filter_size, filter_size, in_filters, out_filters],
-                tf.float32, initializer=tf.random_normal_initializer(
+                tf.float32, initializer=tf.compat.v1.random_normal_initializer(
                     stddev=np.sqrt(2.0 / n)))
-            return tf.nn.conv2d(x, kernel, strides, padding='SAME')
+            return tf.compat.v1.nn.conv2d(x, kernel, strides, padding='SAME')
 
     def _relu(self, x, leakiness=0.0):
         """Relu, with optional leaky support."""
-        return tf.where(tf.less(x, 0.0), leakiness * x, x, name='leaky_relu')
+        return tf.compat.v1.where(tf.less(x, 0.0), leakiness * x, x, name='leaky_relu')
 
     def _fully_connected(self, x, out_dim):
         """FullyConnected layer for final output."""
@@ -177,13 +178,13 @@ class Model(object):
         for ii in range(num_non_batch_dimensions - 1):
             prod_non_batch_dimensions *= int(x.shape[ii + 1])
         x = tf.reshape(x, [tf.shape(x)[0], -1])
-        w = tf.get_variable(
+        w = tf.compat.v1.get_variable(
             'DW', [prod_non_batch_dimensions, out_dim],
-            initializer=tf.uniform_unit_scaling_initializer(factor=1.0))
-        b = tf.get_variable('biases', [out_dim],
+            initializer= tf.compat.v1.uniform_unit_scaling_initializer(factor=1.0))
+        b = tf.compat.v1.get_variable('biases', [out_dim],
                             initializer=tf.constant_initializer())
-        return tf.nn.xw_plus_b(x, w, b)
+        return tf.compat.v1.nn.xw_plus_b(x, w, b)
 
     def _global_avg_pool(self, x):
         assert x.get_shape().ndims == 4
-        return tf.reduce_mean(x, [1, 2])
+        return tf.compat.v1.reduce_mean(x, [1, 2])
